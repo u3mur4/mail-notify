@@ -5,7 +5,6 @@ import (
 
 	"github.com/cenkalti/backoff"
 	"github.com/emersion/go-imap"
-	idle "github.com/emersion/go-imap-idle"
 	"github.com/emersion/go-imap/client"
 )
 
@@ -123,16 +122,14 @@ func (m *MailClient) listen() error {
 	m.unseen = unseen
 	m.Update <- m.unseen
 
-	// Create idle client
-	idleClient := idle.NewClient(c)
-
 	// Create a channel to receive mailbox updates
 	updates := make(chan client.Update)
 	c.Updates = updates
 
+	// Start idling
 	done := make(chan error, 1)
 	go func() {
-		done <- idleClient.IdleWithFallback(nil, 0)
+		done <- c.Idle(nil, nil)
 	}()
 
 	// make sure the cached imap client is exists

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/faiface/beep/speaker"
 	"github.com/martinlindhe/notify"
 	"github.com/mattn/go-shellwords"
 	"github.com/sirupsen/logrus"
@@ -112,7 +111,7 @@ interval=persist
 					}
 					if unseen > 0 {
 						notify.Notify("mail-notify", "New Mail", fmt.Sprintf("You have %d email on %s!", unseen, account.Username), "")
-						speaker.Play(notificationSound)
+						playNotificationSound()
 					}
 				}
 			}()

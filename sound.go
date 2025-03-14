@@ -1,17 +1,19 @@
 package main
 
 import (
-	"time"
-
-	"github.com/faiface/beep"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
+	"errors"
+	"io/ioutil"
+	"os"
+	"os/exec"
 )
 
-// notificationSound plays when a new email received
-var notificationSound beep.StreamSeekCloser
+var notificationSound = "/tmp/notification.mp3"
 
 func init() {
+	if _, err := os.Stat(notificationSound); !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+
 	// decode and load the default notification sound
 	data, err := Assets.Open("notification.mp3")
 	if err != nil {
@@ -19,15 +21,17 @@ func init() {
 		return
 	}
 
-	streamer, format, err := mp3.Decode(data)
+	b, err := ioutil.ReadAll(data)
 	if err != nil {
-		log.Fatal(err)
-	}
-	notificationSound = streamer
-
-	err = speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	if err != nil {
-		log.WithError(err).Fatal("cannot initialize speaker")
+		log.WithError(err).Fatal("cannot read notification sound")
 		return
 	}
+
+	ioutil.WriteFile(notificationSound, b, 0777)
+}
+
+func playNotificationSound() error {
+	cmd := exec.Command("mpv", notificationSound)
+	return cmd.Run()
+
 }

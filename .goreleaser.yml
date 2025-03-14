@@ -1,0 +1,38 @@
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./assets/assets_generate.go
+
+builds:
+- env:
+  - CGO_ENABLED=1
+  goos:
+    - linux
+  goarch:
+    - amd64
+  hooks:
+    post: upx dist/mail-notify_linux_amd64/mail-notify
+
+archives:
+- replacements:
+    amd64: x86_64
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+release:
+  github:
+    owner: u3mur4
+    name: mail-notify
+  draft: true
+  prerelease: false
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'

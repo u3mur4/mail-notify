@@ -8,8 +8,6 @@ import (
 	"github.com/faiface/beep/speaker"
 )
 
-//go:generate go run -tags=dev assets/assets_generate.go
-
 // notificationSound plays when a new email received
 var notificationSound beep.StreamSeekCloser
 

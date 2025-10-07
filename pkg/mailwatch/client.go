@@ -32,6 +32,9 @@ func (m *Client) getCachedImapClient() (*client.Client, error) {
 		log.WithError(err).Warn("cannot create a new cached client")
 		return nil, err
 	}
+	
+	m.cachedClient = c
+	m.cachedClient.Noop()
 
 	// if the connection to the server is closed create a new one
 	go func(m *Client) {
@@ -42,8 +45,6 @@ func (m *Client) getCachedImapClient() (*client.Client, error) {
 	}(m)
 
 	// return the cached client
-	m.cachedClient = c
-	m.cachedClient.Noop()
 	return m.cachedClient, nil
 }
 
@@ -139,9 +140,11 @@ func (m *Client) listen() error {
 	c.Updates = updates
 
 	// Start idling
-	done := make(chan error, 1)
+	done := make(chan error)
 	go func() {
-		done <- c.Idle(nil, nil)
+		err := c.Idle(nil, nil)
+		log.WithError(err).Debug("stop idling")
+		done <- err
 	}()
 
 	// make sure the cached imap client is exists

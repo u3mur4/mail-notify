@@ -1,4 +1,4 @@
 .vscode
-dist
 mail-notify
-assets_vfsdata.go
+*_oauth2.json
+key

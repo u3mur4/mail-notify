@@ -1,4 +1,4 @@
-package main
+package formatter
 
 import (
 	"bytes"
@@ -62,7 +62,7 @@ func uInt32ToCircledNumberStr(number uint32) string {
 }
 
 // formatMailAsPango formats the email number to pango format that is usable by i3blocks
-func formatMailAsPango(unseen uint32) string {
+func Pango(unseen uint32) string {
 	buffer := bytes.Buffer{}
 	fmt.Fprint(&buffer, "<span>")
 	if unseen > 0 {
@@ -72,12 +72,16 @@ func formatMailAsPango(unseen uint32) string {
 	return buffer.String()
 }
 
-func formatMailAsPolybar(unseen uint32, account Account) string {
+func Waybar(unseen uint32) string {
+	return Pango(unseen)
+}
+
+func Polybar(unseen uint32, leftClickCmd string) string {
 	buffer := bytes.Buffer{}
 
 	// left click
 	fmt.Fprint(&buffer, "%{A1:")
-	fmt.Fprint(&buffer, strings.Replace(account.Exec, ":", "\\:", -1))
+	fmt.Fprint(&buffer, strings.Replace(leftClickCmd, ":", "\\:", -1))
 	fmt.Fprint(&buffer, ":}")
 
 	fmt.Fprint(&buffer, "")

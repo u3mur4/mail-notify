@@ -1,6 +1,7 @@
-package main
+package mailwatch
 
 import (
+	"io"
 	"time"
 
 	"github.com/cenkalti/backoff"
@@ -8,21 +9,15 @@ import (
 	"github.com/emersion/go-imap/client"
 )
 
-type Account struct {
-	Username   string `mapstructure:"username"`
-	Password   string `mapstructure:"password"`
-	ImapServer string `mapstructure:"imap_server"`
-	Exec       string `mapstructure:"exec"`
+type Client struct {
+	account           Account
+	unseen            uint32
+	Update            chan uint32
+	cachedClient      *client.Client
+	clientDebugOutput io.Writer
 }
 
-type MailClient struct {
-	account      Account
-	unseen       uint32
-	Update       chan uint32
-	cachedClient *client.Client
-}
-
-func (m *MailClient) getCachedImapClient() (*client.Client, error) {
+func (m *Client) getCachedImapClient() (*client.Client, error) {
 	log.Debug("getting cached client")
 	// if theres is a cached client return
 	if m.cachedClient != nil {
@@ -39,7 +34,7 @@ func (m *MailClient) getCachedImapClient() (*client.Client, error) {
 	}
 
 	// if the connection to the server is closed create a new one
-	go func(m *MailClient) {
+	go func(m *Client) {
 		<-m.cachedClient.LoggedOut()
 		log.Debug("cached client connection to the server is closed")
 		m.cachedClient = nil
@@ -52,12 +47,16 @@ func (m *MailClient) getCachedImapClient() (*client.Client, error) {
 	return m.cachedClient, nil
 }
 
-func (m *MailClient) createNewImapClient() (*client.Client, error) {
+func (m *Client) SetDebug(output io.Writer) {
+	m.clientDebugOutput = output
+	if m.cachedClient != nil {
+		m.cachedClient.SetDebug(output)
+	}
+}
+
+func (m *Client) createNewImapClient() (*client.Client, error) {
 	// Connect to imap server
 	imapServer := "imap.gmail.com:993"
-	if m.account.ImapServer != "" {
-		imapServer = m.account.ImapServer
-	}
 
 	c, err := client.DialTLS(imapServer, nil)
 	if err != nil {
@@ -65,10 +64,23 @@ func (m *MailClient) createNewImapClient() (*client.Client, error) {
 		return nil, err
 	}
 
-	// Login
-	err = c.Login(m.account.Username, m.account.Password)
+	if m.clientDebugOutput != nil {
+		c.SetDebug(m.clientDebugOutput)
+	}
+
+	gmailToken := newOAuth2GmailToken(&m.account)
+	gmailToken.Token()
+	err = gmailToken.HandleTokenExpiration()
 	if err != nil {
-		log.WithError(err).Error("cannot login")
+		log.WithError(err).Error("cannot handle token expiration")
+	}
+	token := gmailToken.Token()
+
+	sc := NewOAuth2Client(m.account.Username, token.AccessToken)
+
+	err = c.Authenticate(sc)
+	if err != nil {
+		log.WithError(err).Error("cannot authenticate")
 		return nil, err
 	}
 
@@ -81,7 +93,7 @@ func (m *MailClient) createNewImapClient() (*client.Client, error) {
 	return c, nil
 }
 
-func (m *MailClient) Listen() error {
+func (m *Client) Listen() error {
 	b := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), 5)
 
 	for {
@@ -106,7 +118,7 @@ func (m *MailClient) Listen() error {
 	}
 }
 
-func (m *MailClient) listen() error {
+func (m *Client) listen() error {
 	c, err := m.createNewImapClient()
 	if err != nil {
 		log.WithError(err).Debug("cannot create new imap client")
@@ -162,7 +174,7 @@ func (m *MailClient) listen() error {
 	}
 }
 
-func (m *MailClient) getUnseen(c *client.Client) (uint32, error) {
+func (m *Client) getUnseen(c *client.Client) (uint32, error) {
 	log.Debug("getting unseen emails")
 
 	criteria := imap.NewSearchCriteria()
@@ -178,8 +190,8 @@ func (m *MailClient) getUnseen(c *client.Client) (uint32, error) {
 	return uint32(len(ids)), nil
 }
 
-func NewMailClient(account Account) (MailClient, error) {
-	mailClient := MailClient{
+func NewMailClient(account Account) (Client, error) {
+	mailClient := Client{
 		account: account,
 		Update:  make(chan uint32),
 		unseen:  0,

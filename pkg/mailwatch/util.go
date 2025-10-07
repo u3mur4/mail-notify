@@ -1,51 +1,16 @@
 package mailwatch
 
 import (
-	_ "embed"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	_ "embed"
 	"fmt"
 	"io"
-	"os"
 )
 
-func copyFile(src string, dst string) error {
-	// Open the source file
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	// Create the destination file
-	destinationFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destinationFile.Close()
-
-	// Copy the file content
-	_, err = io.Copy(destinationFile, sourceFile)
-	if err != nil {
-		return err
-	}
-
-	// Optionally, you can also copy the file permissions from the source file
-	srcInfo, err := sourceFile.Stat()
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(dst, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 //go:embed key
-var	_key []byte
+var _key []byte
 
 // Encrypt function
 func encrypt(plaintext []byte) ([]byte, error) {

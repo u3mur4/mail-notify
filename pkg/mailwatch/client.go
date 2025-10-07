@@ -104,7 +104,7 @@ func (m *Client) Listen() error {
 		}
 
 		// if the email client is running at least for 5 minutes
-		if time.Now().Sub(startTime) > time.Second*5 {
+		if time.Since(startTime) > time.Second*5 {
 			b.Reset()
 		}
 

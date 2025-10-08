@@ -2,72 +2,42 @@ package mailwatch
 
 import (
 	"io"
+	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/emersion/go-imap"
-	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 )
 
 type Client struct {
 	account           Account
 	unseen            uint32
 	Update            chan uint32
-	cachedClient      *client.Client
 	clientDebugOutput io.Writer
-}
-
-func (m *Client) getCachedImapClient() (*client.Client, error) {
-	log.Debug("getting cached client")
-	// if theres is a cached client return
-	if m.cachedClient != nil {
-		log.Debug("cached client found")
-		m.cachedClient.Noop()
-		return m.cachedClient, nil
-	}
-
-	// no cache client, create a new one
-	c, err := m.createNewImapClient()
-	if err != nil {
-		log.WithError(err).Warn("cannot create a new cached client")
-		return nil, err
-	}
-	
-	m.cachedClient = c
-	m.cachedClient.Noop()
-
-	// if the connection to the server is closed create a new one
-	go func(m *Client) {
-		<-m.cachedClient.LoggedOut()
-		log.Debug("cached client connection to the server is closed")
-		m.cachedClient = nil
-		m.getCachedImapClient()
-	}(m)
-
-	// return the cached client
-	return m.cachedClient, nil
 }
 
 func (m *Client) SetDebug(output io.Writer) {
 	m.clientDebugOutput = output
-	if m.cachedClient != nil {
-		m.cachedClient.SetDebug(output)
-	}
 }
 
-func (m *Client) createNewImapClient() (*client.Client, error) {
+func (m *Client) createNewImapClient(options *imapclient.Options) (*imapclient.Client, error) {
+	if options == nil {
+		options = &imapclient.Options{}
+	}
+	options.DebugWriter = m.clientDebugOutput
+
 	// Connect to imap server
 	imapServer := "imap.gmail.com:993"
 
-	c, err := client.DialTLS(imapServer, nil)
+	c, err := imapclient.DialTLS(imapServer, options)
+
+
 	if err != nil {
 		log.WithError(err).Error("cannot connet to imap server")
 		return nil, err
 	}
 
-	if m.clientDebugOutput != nil {
-		c.SetDebug(m.clientDebugOutput)
-	}
 
 	gmailToken := newOAuth2GmailToken(&m.account)
 	gmailToken.Token()
@@ -86,7 +56,7 @@ func (m *Client) createNewImapClient() (*client.Client, error) {
 	}
 
 	// Select a mailbox
-	if _, err := c.Select("INBOX", false); err != nil {
+	if _, err := c.Select("INBOX", nil).Wait(); err != nil {
 		log.WithError(err).Debug("cannot select mailbox")
 		return nil, err
 	}
@@ -100,12 +70,10 @@ func (m *Client) Listen() error {
 	for {
 		startTime := time.Now()
 		err := m.listen()
-		if err != nil {
-			log.WithError(err).Warn("email client stopped")
-		}
+		log.WithError(err).Warn("email client stopped")
 
 		// if the email client is running at least for 5 minutes
-		if time.Since(startTime) > time.Second*5 {
+		if time.Since(startTime) > time.Minute*5 {
 			b.Reset()
 		}
 
@@ -120,7 +88,57 @@ func (m *Client) Listen() error {
 }
 
 func (m *Client) listen() error {
-	c, err := m.createNewImapClient()
+	getUnseenAndUpdate := func() error {
+		uc, err := m.createNewImapClient(nil)
+		if err != nil {
+			log.WithError(err).Debug("cannot create new imap client")
+			return err
+		}
+		defer uc.Close()
+		unseen, err := m.getUnseen(uc)
+		if err != nil {
+			log.WithError(err).Debug("cannot get unseen emails")
+			return err
+		}
+		if m.unseen != unseen {
+			log.WithField("unseen", unseen).Debug("unseen mails number changed")
+			m.unseen = unseen
+			m.Update <- m.unseen
+		}
+		return nil
+	}
+
+	var debounceTimer *time.Timer
+	const debounceDelay = 250 * time.Millisecond
+	mu := sync.Mutex{}
+
+	debouncedGetUnseenAndUpdate := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if debounceTimer != nil {
+			return
+		}
+		debounceTimer = time.AfterFunc(debounceDelay, func() {
+			getUnseenAndUpdate()
+			debounceTimer = nil
+		})
+	}
+
+	options := imapclient.Options{
+		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
+			Expunge: func(seqNum uint32) {
+				debouncedGetUnseenAndUpdate()
+			},
+			Mailbox: func(data *imapclient.UnilateralDataMailbox) {
+				debouncedGetUnseenAndUpdate()
+			},
+			Fetch: func(msg *imapclient.FetchMessageData) {
+				debouncedGetUnseenAndUpdate()
+			},
+		},
+	}
+
+	c, err := m.createNewImapClient(&options)
 	if err != nil {
 		log.WithError(err).Debug("cannot create new imap client")
 		return err
@@ -135,62 +153,33 @@ func (m *Client) listen() error {
 	m.unseen = unseen
 	m.Update <- m.unseen
 
-	// Create a channel to receive mailbox updates
-	updates := make(chan client.Update)
-	c.Updates = updates
-
 	// Start idling
-	done := make(chan error)
-	go func() {
-		err := c.Idle(nil, nil)
-		log.WithError(err).Debug("stop idling")
-		done <- err
-	}()
-
-	// make sure the cached imap client is exists
-	m.getCachedImapClient()
-
-	// Listen for updates
-	log.Debug("start listening for updates")
-	for {
-		select {
-		case <-updates:
-			log.Debug("new mailbox event")
-			uc, err := m.getCachedImapClient()
-			if err != nil {
-				log.WithError(err).Debug("cannot create new imap client")
-				return err
-			}
-			unseen, err := m.getUnseen(uc)
-			if err != nil {
-				log.WithError(err).Debug("cannot get unseen emails")
-			}
-			if m.unseen != unseen {
-				log.WithField("unseen", unseen).Debug("unseen mails number changed")
-				m.unseen = unseen
-				m.Update <- m.unseen
-			}
-		case err := <-done:
-			log.WithError(err).Debug("stop listening for updates")
-			return err
-		}
+	idleCmd, err := c.Idle()
+	if err != nil {
+		return err
 	}
+	log.Debug("start listening for updates")
+	return idleCmd.Wait()
+
 }
 
-func (m *Client) getUnseen(c *client.Client) (uint32, error) {
+func (m *Client) getUnseen(c *imapclient.Client) (uint32, error) {
 	log.Debug("getting unseen emails")
 
-	criteria := imap.NewSearchCriteria()
-	criteria.WithoutFlags = []string{imap.SeenFlag}
-	ids, err := c.Search(criteria)
+	searchCmd := c.Search(&imap.SearchCriteria{
+		NotFlag: []imap.Flag{imap.FlagSeen},
+	}, &imap.SearchOptions{
+		ReturnCount: true,
+	})
+
+	data, err := searchCmd.Wait()
 	if err != nil {
 		log.WithError(err).Warning("cannot search for unseen emails")
 		return 0, err
 	}
 
-	log.WithField("unseen", len(ids)).Debug("got unseen emails")
-
-	return uint32(len(ids)), nil
+	log.WithField("unseen", data.Count).Debug("got unseen emails")
+	return data.Count, nil
 }
 
 func NewMailClient(account Account) (Client, error) {

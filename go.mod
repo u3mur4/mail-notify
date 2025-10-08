@@ -6,7 +6,7 @@ toolchain go1.23.1
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
-	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-imap/v2 v2.0.0-beta.4
 	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43
 	github.com/faiface/beep v1.1.0
 	github.com/fogleman/gg v1.3.0
@@ -24,6 +24,7 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/deckarep/gosx-notifier v0.0.0-20180201035817-e127226297fb // indirect
+	github.com/emersion/go-message v0.18.1 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
@@ -39,7 +40,6 @@ require (
 	golang.org/x/image v0.21.0 // indirect
 	golang.org/x/mobile v0.0.0-20241004191011-08a83c5af9f8 // indirect
 	golang.org/x/sys v0.26.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2 // indirect
 )

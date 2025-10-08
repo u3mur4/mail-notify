@@ -15,12 +15,23 @@ import (
 //go:embed assets/notification.mp3
 var notificationSoundData []byte
 
-func playNotification() {
-	// Create a byte reader from the embedded MP3 data
-	audioData := bytes.NewReader(notificationSoundData)
+func audioData() io.ReadCloser {
+	return io.NopCloser(bytes.NewReader(notificationSoundData))
+}
 
+func streamSeakCloser() (beep.StreamSeekCloser, beep.Format, error) {
 	// Decode the MP3 file
-	streamer, format, err := mp3.Decode(io.NopCloser(audioData))
+	streamer, format, err := mp3.Decode(io.NopCloser(audioData()))
+	if err != nil {
+		log.Fatalf("Failed to decode MP3: %v", err)
+	}
+	return streamer, format, err
+}
+
+
+func init() {
+	// Decode the MP3 file
+	streamer, format, err := streamSeakCloser()
 	if err != nil {
 		log.Fatalf("Failed to decode MP3: %v", err)
 	}
@@ -31,6 +42,15 @@ func playNotification() {
 	if err != nil {
 		log.Fatalf("Failed to initialize speaker: %v", err)
 	}
+}
+
+func playNotification() {
+	// Decode the MP3 file
+	streamer, _, err := streamSeakCloser()
+	if err != nil {
+		log.Fatalf("Failed to decode MP3: %v", err)
+	}
+	defer streamer.Close()
 
 	// Play the sound
 	done := make(chan bool)

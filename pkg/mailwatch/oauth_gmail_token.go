@@ -51,6 +51,7 @@ func (o *oAuth2GmailToken) Token() *oauth2.Token {
 		tok = getTokenFromWeb(config)
 		o.saveToken(o.Account.TokenFilePath(), tok)
 	}
+	o.token = tok
 	return tok
 }
 
@@ -159,7 +160,7 @@ func (o *oAuth2GmailToken) HandleTokenExpiration() (err error) {
 		return err
 	}
 
-	if newToken.AccessToken != o.token.AccessToken {
+	if o.token == nil || newToken.AccessToken != o.token.AccessToken {
 		o.token = newToken
 		// Print current token and expiration time
 		log.WithField("token", newToken.AccessToken).WithField("expires", newToken.Expiry).Info("token refreshed")

@@ -60,9 +60,51 @@ func main() {
 			exitIfErr(err)
 
 			if waybarExec {
-				cmd := exec.Command("bash", "-c", account.Exec)
-				cmd.Run()
+				err := mailwatch.CheckAuth(&account)
+				if err == nil {
+					cmd := exec.Command("bash", "-c", account.Exec)
+					cmd.Run()
+				} else {
+					urlBytes, readErr := os.ReadFile(mailwatch.AuthURLPath(account))
+					if readErr == nil {
+						exec.Command("xdg-open", strings.TrimSpace(string(urlBytes))).Run()
+					} else {
+						_, authURL, tokenChan, err := mailwatch.StartAuthFlow(&account)
+						if err != nil {
+							exitIfErr(err)
+						}
+						exec.Command("xdg-open", authURL).Run()
+						token := <-tokenChan
+						if token == nil {
+							exitIfErr(fmt.Errorf("authentication failed"))
+						}
+					}
+				}
 				return
+			}
+
+			needsAuth, authURL, tokenChan, err := mailwatch.StartAuthFlow(&account)
+			if err != nil {
+				exitIfErr(err)
+			}
+			if needsAuth {
+				os.WriteFile(mailwatch.AuthURLPath(account), []byte(authURL), 0644)
+
+				switch format {
+				case "waybar":
+					fmt.Fprintln(os.Stdout, formatter.Waybar(0, false))
+				case "i3blocks":
+					fmt.Fprintln(os.Stdout, formatter.Pango(0, false))
+				case "polybar":
+					fmt.Fprintln(os.Stdout, formatter.Polybar(0, "", false))
+				}
+
+				token := <-tokenChan
+				if token == nil {
+					exitIfErr(fmt.Errorf("authentication failed"))
+				}
+
+				os.Remove(mailwatch.AuthURLPath(account))
 			}
 
 			client, err := mailwatch.NewMailClient(account)
@@ -77,11 +119,12 @@ func main() {
 				for unseen := range client.Update {
 					switch format {
 					case "polybar":
-						fmt.Fprintln(os.Stdout, formatter.Polybar(unseen, account.Exec))
+						fmt.Fprintln(os.Stdout, formatter.Polybar(unseen, account.Exec, true))
 					case "i3blocks":
-						fmt.Fprintln(os.Stdout, formatter.Pango(unseen))
+						fmt.Fprintln(os.Stdout, formatter.Pango(unseen, true))
 					case "waybar":
-						fmt.Fprintln(os.Stdout, formatter.Waybar(unseen))
+						fmt.Fprintln(os.Stdout, formatter.Waybar(unseen, true))
+
 					}
 					if unseen > 0 {
 						notify.Notify("mail-notify", "New Mail", fmt.Sprintf("You have %d email on %s!", unseen, account.Username), "")

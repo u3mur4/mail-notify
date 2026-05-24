@@ -3,7 +3,6 @@ package mailwatch
 import (
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -45,9 +44,6 @@ func (m *Client) createNewImapClient(options *imapclient.Options) (*imapclient.C
 	err = gmailToken.HandleTokenExpiration()
 	if err != nil {
 		log.WithError(err).Error("cannot handle token expiration")
-		if err := os.Remove(m.account.TokenFilePath()); err != nil && !os.IsNotExist(err) {
-			log.WithError(err).Error("cannot remove stale token file")
-		}
 	}
 	token := gmailToken.Token()
 	if token == nil {

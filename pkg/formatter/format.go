@@ -62,21 +62,24 @@ func uInt32ToCircledNumberStr(number uint32) string {
 }
 
 // formatMailAsPango formats the email number to pango format that is usable by i3blocks
-func Pango(unseen uint32) string {
+func Pango(unseen uint32, authenticated bool) string {
 	buffer := bytes.Buffer{}
 	fmt.Fprint(&buffer, "<span>")
-	if unseen > 0 {
+	if !authenticated {
+		fmt.Fprint(&buffer, "<span size='large' rise='2000' foreground='red'>⟳</span>")
+	} else if unseen > 0 {
 		fmt.Fprintf(&buffer, "<span size='large' rise='2000' foreground='red'>%s</span>", uInt32ToCircledNumberStr(unseen))
 	}
 	fmt.Fprint(&buffer, "</span>")
 	return buffer.String()
 }
 
-func Waybar(unseen uint32) string {
-	return Pango(unseen)
+func Waybar(unseen uint32, authenticated bool) string {
+	return Pango(unseen, authenticated)
 }
 
-func Polybar(unseen uint32, leftClickCmd string) string {
+// TODO: handle unauthenticated state with clickable auth URL
+func Polybar(unseen uint32, leftClickCmd string, authenticated bool) string {
 	buffer := bytes.Buffer{}
 
 	// left click

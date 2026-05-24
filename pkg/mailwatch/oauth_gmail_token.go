@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -56,15 +57,21 @@ func (o *oAuth2GmailToken) Token() *oauth2.Token {
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-	// Generate authorization URL
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Fatalf("Unable to start callback server: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	config.RedirectURL = fmt.Sprintf("http://localhost:%d/", port)
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Go to the following link in your browser:\n%v\n", authURL)
 
 	// Channel to receive the authorization code
 	codeChan := make(chan string)
 
-	// Start the web server to handle the redirect
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Get the authorization code from the URL parameters
 		code := r.URL.Query().Get("code")
 		if code != "" {
@@ -79,10 +86,9 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 		}
 	})
 
-	// Start the server in a goroutine so it doesn't block
-	server := &http.Server{Addr: ":14000"}
+	server := &http.Server{Handler: mux}
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("ListenAndServe(): %v", err)
 		}
 	}()
@@ -170,6 +176,76 @@ func (o *oAuth2GmailToken) HandleTokenExpiration() (err error) {
 	}
 
 	return nil
+}
+
+func AuthURLPath(account Account) string {
+	return path.Join(configDir(), account.Username+"_auth_url")
+}
+
+func CheckAuth(account *Account) error {
+	oauth := newOAuth2GmailToken(account)
+	return oauth.HandleTokenExpiration()
+}
+
+func StartAuthFlow(account *Account) (needsAuth bool, authURL string, tokenChan <-chan *oauth2.Token, err error) {
+	oauth := newOAuth2GmailToken(account)
+	err = oauth.HandleTokenExpiration()
+	if err == nil {
+		return false, "", nil, nil
+	}
+
+	config, err := oauth.config()
+	if err != nil {
+		return false, "", nil, err
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return false, "", nil, err
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	config.RedirectURL = fmt.Sprintf("http://localhost:%d/", port)
+	authURL = config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+
+	ch := make(chan *oauth2.Token, 1)
+	codeChan := make(chan string, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		if code != "" {
+			codeChan <- code
+			fmt.Fprintf(w, "Authorization code received. You can close this window.")
+		} else {
+			fmt.Fprintf(w, "No authorization code received.")
+		}
+	})
+
+	server := &http.Server{Handler: mux}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.WithError(err).Error("callback server error")
+		}
+	}()
+
+	go func() {
+		authCode := <-codeChan
+		go func() {
+			time.Sleep(1 * time.Second)
+			server.Shutdown(context.Background())
+		}()
+		tok, err := config.Exchange(context.Background(), authCode)
+		if err != nil {
+			log.WithError(err).Error("cannot exchange auth code for token")
+			ch <- nil
+			return
+		}
+		oauth.saveToken(account.TokenFilePath(), tok)
+		ch <- tok
+	}()
+
+	return true, authURL, ch, nil
 }
 
 func ClientSecretPath() string {

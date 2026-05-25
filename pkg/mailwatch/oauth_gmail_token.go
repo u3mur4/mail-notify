@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"time"
@@ -14,6 +16,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
+
+var ErrNeedsAuth = errors.New("authentication required")
 
 // Define Gmail OAuth2 scope
 var gmailScope = "https://mail.google.com/"
@@ -152,6 +156,33 @@ func (o *oAuth2GmailToken) saveToken(path string, token *oauth2.Token) error {
 	return nil
 }
 
+func IsNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		var netErr net.Error
+		if errors.As(urlErr.Err, &netErr) {
+			return true
+		}
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return false
+}
+
+func isNetworkAvailable() bool {
+	conn, err := net.DialTimeout("tcp", imapServerAddr, time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
 func (o *oAuth2GmailToken) HandleTokenExpiration() (err error) {
 	// Create a TokenSource that automatically handles token expiration
 	config, err := o.config()
@@ -183,15 +214,26 @@ func AuthURLPath(account Account) string {
 }
 
 func CheckAuth(account *Account) error {
+	if !isNetworkAvailable() {
+		return fmt.Errorf("network unavailable")
+	}
 	oauth := newOAuth2GmailToken(account)
 	return oauth.HandleTokenExpiration()
 }
 
 func StartAuthFlow(account *Account) (needsAuth bool, authURL string, tokenChan <-chan *oauth2.Token, err error) {
+	if !isNetworkAvailable() {
+		return false, "", nil, fmt.Errorf("network unavailable")
+	}
+
 	oauth := newOAuth2GmailToken(account)
 	err = oauth.HandleTokenExpiration()
 	if err == nil {
 		return false, "", nil, nil
+	}
+
+	if IsNetworkError(err) {
+		return false, "", nil, fmt.Errorf("network unavailable: %w", err)
 	}
 
 	config, err := oauth.config()

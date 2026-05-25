@@ -71,12 +71,13 @@ func main() {
 					} else {
 						_, authURL, tokenChan, err := mailwatch.StartAuthFlow(&account)
 						if err != nil {
-							exitIfErr(err)
-						}
-						exec.Command("xdg-open", authURL).Run()
-						token := <-tokenChan
-						if token == nil {
-							exitIfErr(fmt.Errorf("authentication failed"))
+							log.WithError(err).Error("cannot start auth flow")
+						} else {
+							exec.Command("xdg-open", authURL).Run()
+							token := <-tokenChan
+							if token == nil {
+								log.Error("authentication failed")
+							}
 						}
 					}
 				}
@@ -85,18 +86,19 @@ func main() {
 
 			needsAuth, authURL, tokenChan, err := mailwatch.StartAuthFlow(&account)
 			if err != nil {
-				exitIfErr(err)
+				log.WithError(err).Error("authentication pre-check failed")
 			}
 			if needsAuth {
 				os.WriteFile(mailwatch.AuthURLPath(account), []byte(authURL), 0644)
 
+				authEvent := mailwatch.UpdateEvent{Status: mailwatch.StatusNeedsAuth}
 				switch format {
 				case "waybar":
-					fmt.Fprintln(os.Stdout, formatter.Waybar(0, false))
+					fmt.Fprintln(os.Stdout, formatter.Waybar(authEvent))
 				case "i3blocks":
-					fmt.Fprintln(os.Stdout, formatter.Pango(0, false))
+					fmt.Fprintln(os.Stdout, formatter.Pango(authEvent))
 				case "polybar":
-					fmt.Fprintln(os.Stdout, formatter.Polybar(0, "", false))
+					fmt.Fprintln(os.Stdout, formatter.Polybar(authEvent, account.Exec))
 				}
 
 				token := <-tokenChan
@@ -116,22 +118,21 @@ func main() {
 
 			// update loop
 			go func() {
-				for unseen := range client.Update {
+				for event := range client.Update {
 					switch format {
 					case "polybar":
-						fmt.Fprintln(os.Stdout, formatter.Polybar(unseen, account.Exec, true))
+						fmt.Fprintln(os.Stdout, formatter.Polybar(event, account.Exec))
 					case "i3blocks":
-						fmt.Fprintln(os.Stdout, formatter.Pango(unseen, true))
+						fmt.Fprintln(os.Stdout, formatter.Pango(event))
 					case "waybar":
-						fmt.Fprintln(os.Stdout, formatter.Waybar(unseen, true))
-
+						fmt.Fprintln(os.Stdout, formatter.Waybar(event))
 					}
-					if unseen > 0 {
-						notify.Notify("mail-notify", "New Mail", fmt.Sprintf("You have %d email on %s!", unseen, account.Username), "")
+					if event.Status == mailwatch.StatusConnected && event.Unseen > 0 {
+						notify.Notify("mail-notify", "New Mail", fmt.Sprintf("You have %d email on %s!", event.Unseen, account.Username), "")
 						playNotification()
 					}
 					if i3lockPlugin > 0 {
-						i3lock.GenerateImage(account.Username, unseen, i3lockPlugin, 50, true)
+						i3lock.GenerateImage(account.Username, event.Unseen, i3lockPlugin, 50, true)
 					}
 				}
 				fmt.Println("update loop stopped")

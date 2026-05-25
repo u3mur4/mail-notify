@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/u3mur4/mail-notify/pkg/mailwatch"
 )
 
 // uInt32ToCircledNumberStr converts int to unicode circled number
@@ -62,24 +64,32 @@ func uInt32ToCircledNumberStr(number uint32) string {
 }
 
 // formatMailAsPango formats the email number to pango format that is usable by i3blocks
-func Pango(unseen uint32, authenticated bool) string {
+func Pango(event mailwatch.UpdateEvent) string {
 	buffer := bytes.Buffer{}
 	fmt.Fprint(&buffer, "<span>")
-	if !authenticated {
+
+	switch event.Status {
+	case mailwatch.StatusDisconnected:
+		fmt.Fprint(&buffer, "</span>")
+		return `<span foreground='gray'></span>`
+	case mailwatch.StatusNeedsAuth:
 		fmt.Fprint(&buffer, "<span size='large' rise='2000' foreground='red'>⟳</span>")
-	} else if unseen > 0 {
-		fmt.Fprintf(&buffer, "<span size='large' rise='2000' foreground='red'>%s</span>", uInt32ToCircledNumberStr(unseen))
+	case mailwatch.StatusConnected:
+		if event.Unseen > 0 {
+			fmt.Fprintf(&buffer, "<span size='large' rise='2000' foreground='red'>%s</span>", uInt32ToCircledNumberStr(event.Unseen))
+		}
 	}
+
 	fmt.Fprint(&buffer, "</span>")
 	return buffer.String()
 }
 
-func Waybar(unseen uint32, authenticated bool) string {
-	return Pango(unseen, authenticated)
+func Waybar(event mailwatch.UpdateEvent) string {
+	return Pango(event)
 }
 
 // TODO: handle unauthenticated state with clickable auth URL
-func Polybar(unseen uint32, leftClickCmd string, authenticated bool) string {
+func Polybar(event mailwatch.UpdateEvent, leftClickCmd string) string {
 	buffer := bytes.Buffer{}
 
 	// left click
@@ -88,9 +98,9 @@ func Polybar(unseen uint32, leftClickCmd string, authenticated bool) string {
 	fmt.Fprint(&buffer, ":}")
 
 	fmt.Fprint(&buffer, "")
-	if unseen > 0 {
+	if event.Status == mailwatch.StatusConnected && event.Unseen > 0 {
 		fmt.Fprint(&buffer, "%{F#f00}%{O-3}")
-		fmt.Fprintf(&buffer, "%s", uInt32ToCircledNumberStr(unseen))
+		fmt.Fprintf(&buffer, "%s", uInt32ToCircledNumberStr(event.Unseen))
 		fmt.Fprint(&buffer, "%{F-}%{O}")
 	}
 	// end left click
